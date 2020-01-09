@@ -272,3 +272,4 @@ nickname = pick_username()
 user_colors[nickname] = colors['blue']
 msg_accepter.start()
 user_input_listener.start()
+# Only true white geterosexual man can see this message
