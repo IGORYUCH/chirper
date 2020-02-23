@@ -83,12 +83,12 @@ class Connected_User(Thread):
                     self.send_msg('system: this room name is occupied')
             elif data_words[0] == 'USERLIST':
                 if self.room:
-                    self.send_msg( ('system: ' + ','.join([user.nickname for user in self.room.connected_users])) )
+                    self.send_msg( ('system: ' + ', '.join([user.nickname for user in self.room.connected_users])) )
                 else:
                     self.send_msg('system: you are not in the room')
             elif data_words[0] == 'ROOMLIST':
                 if occupied_room_names:
-                    self.send_msg('system: the list fo abaliable rooms ' + ','.join(occupied_room_names))
+                    self.send_msg('system: the list fo abaliable rooms: ' + ', '.join(occupied_room_names))
                 else:
                     self.send_msg('system: no rooms have been created yet')
             elif data_words[0] == 'DISCONNECT':
@@ -140,7 +140,7 @@ sock = socket.socket()
 sock.bind((HOST,PORT))
 connections = []
 rooms = []
-occupied_nicknames = ['system', 'System', 'admin', 'Admin', 'Administrator', 'FOXYMILIAN', 'HuHguZ', 'FOXYMILLIAN']
+occupied_nicknames = ['system', 'System', 'admin', 'Admin', 'Administrator', 'FOXYMILIAN', 'HuHguZ', 'FOXYMILLIAN','Alice']
 occupied_room_names = []
 print('Running on', HOST + ':' + str(PORT), 'started', ctime(), '\nWaiting for connections...')
 while True:

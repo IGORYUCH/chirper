@@ -2,6 +2,7 @@ import time
 import socket
 from threading import Thread
 import curses
+import sys
 
 def err_handler(function):
     def wrapper(*args,**kwargs):
@@ -12,7 +13,7 @@ def err_handler(function):
             screen.addstr(0,0,function.__name__+' '+str(err.args))
     return wrapper
 
-            
+
 class Server_listener(Thread):
     def __init__(self):
         Thread.__init__(self)
@@ -69,8 +70,12 @@ def print_screen() -> None:
     else:
         for string in strings[-max_strings:]:
             if string[0]:
-                screen.addstr(string_y, 1, string[0], user_colors.get(string[0],colors['green']))
-                screen.addstr(string_y,1 + len(string[0]), string[1])
+                if '@' + nickname in string[1]:
+                    screen.addstr(string_y, 1, string[0],user_colors.get(string[0], colors['green']))
+                    screen.addstr(string_y,1 + len(string[0]), string[1], curses.color_pair(7))
+                else:
+                    screen.addstr(string_y, 1, string[0], user_colors.get(string[0], colors['green']))
+                    screen.addstr(string_y,1 + len(string[0]), string[1],curses.color_pair(8))
             else:
                 screen.addstr(string_y,1, string[1])
             string_y += 1
@@ -119,7 +124,7 @@ def parse_command(command_string: str) -> str:
         add_str('system: cant recognize "'+words[0]+'" command',
                 ':try !help to see the list of commands')
 
-                             
+
 @err_handler           
 def get_msg(welcome_msg = '>>> ') -> str:
     global scrolled_strings
@@ -129,21 +134,21 @@ def get_msg(welcome_msg = '>>> ') -> str:
     enter = False
     msg_free_space = STR_FREE_SPACE - len(welcome_msg)
     # the avaliable space for typed message '-2' is a compensation of both left and right borders
-    screen.addstr(22, 1, welcome_msg)
+    screen.addstr(SCREEN_Y - 2, 1, welcome_msg)
     screen.refresh()
     while not enter:
-        letter = screen.getch(22, cursor_x)
+        letter = screen.getch(SCREEN_Y - 2, cursor_x)
         if letter == 10: # Enter
             if letter_list:
-                screen.addstr(22, 1, ' ' * STR_FREE_SPACE) # clear the input area
+                screen.addstr(SCREEN_Y - 2, 1, ' ' * STR_FREE_SPACE) # clear the input area
                 enter = True
         elif letter == 8: # Backspace
             if letter_list:
                 letter_x = len(welcome_msg) + 1
                 letter_list.pop()
-                screen.addstr(22,letter_x,' ' * msg_free_space)
+                screen.addstr(SCREEN_Y - 2,letter_x,' ' * msg_free_space)
                 for char in letter_list[-msg_free_space:]:
-                    screen.addstr(22, letter_x, char)
+                    screen.addstr(SCREEN_Y - 2, letter_x, char)
                     letter_x += 1
                 if len(letter_list) < msg_free_space - 1:
                     cursor_x -= 1
@@ -160,17 +165,20 @@ def get_msg(welcome_msg = '>>> ') -> str:
         elif letter == 261: # Arrow right
             pass
         elif letter == 27: # Esc
+            sock.close()
             exit()
-        else: # Another letter
+        elif letter <32 or letter == 127: # prevent ctrl keypresses
+            pass
+        else: # Another char
             letter_list.append(chr(letter))
             letter_x = len(welcome_msg) + 1
             for char in letter_list[-msg_free_space:]:
-                screen.addstr(22, letter_x, char)
+                screen.addstr(SCREEN_Y - 2, letter_x, char)
                 letter_x += 1
             if len(letter_list) < msg_free_space:
                 cursor_x += 1
     return ''.join(letter_list)  
-    
+
 @err_handler
 def pick_username() -> str:
     picked = False
@@ -233,7 +241,8 @@ curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
 curses.init_pair(4, curses.COLOR_CYAN, curses.COLOR_BLACK)
 curses.init_pair(5, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
 curses.init_pair(6, curses.COLOR_GREEN, curses.COLOR_BLACK)
-
+curses.init_pair(7, curses.COLOR_BLACK, curses.COLOR_WHITE)
+curses.init_pair(8, curses.COLOR_WHITE, curses.COLOR_BLACK)
 colors = {
     'red':curses.color_pair(1),
     'blue':curses.color_pair(2),
@@ -253,29 +262,34 @@ strings = []
 disconnected = False
 something = True
 HOST, PORT = '127.0.0.1', 9090
+nickname = 'some name has to be initialized'
 
-while something:
-    server_listener = Server_listener()
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    connect_to_server(HOST,PORT)
-    disconnected = False
-    nickname = pick_username()
-    server_listener.start()
-    user_colors[nickname] = colors['blue']
-    while not disconnected:
-        message = get_msg()
-        if len(message) > 255:
-            add_str('system: 255 symbols message limit')
-            continue
-        if not (message.strip() in ('','\n','\t','\r')):
-            if message[0] == '!':
-                command = parse_command(message)
-                if command:
-                    sent = server_listener.send_data(command)
-                    if not sent:
-                        disconnected = True
-            else:
-                sent = server_listener.send_data('MESSAGE '+nickname + ": " + message)
-                if not sent:
-                    disconnected = True
-
+if __name__ == '__main__':
+    try:
+        while something:
+            server_listener = Server_listener()
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            connect_to_server(HOST,PORT)
+            disconnected = False
+            nickname = pick_username()
+            server_listener.start()
+            user_colors[nickname] = colors['blue']
+            while not disconnected:
+                message = get_msg()
+                if len(message) > 255:
+                    add_str('system: 255 symbols message limit')
+                    continue
+                if not (message.strip() in ('','\n','\t','\r')):
+                    if message[0] == '!':
+                        command = parse_command(message)
+                        if command:
+                            sent = server_listener.send_data(command)
+                            if not sent:
+                                disconnected = True
+                    else:
+                        sent = server_listener.send_data('MESSAGE '+nickname + ": " + message)
+                        if not sent:
+                            disconnected = True
+    except Exception as err:
+        screen.addstr(0,0,' '+str(err.args))
+    
