@@ -1,20 +1,25 @@
-import time
+from time import ctime
 import socket
 from threading import Thread
 import curses
-import sys
+import rsa
 
 def err_handler(function):
+    
     def wrapper(*args,**kwargs):
         try:
             result = function(*args,**kwargs)
             return result
         except Exception as err:
-            screen.addstr(0,0,function.__name__+' '+str(err.args))
+            screen.addstr(0, 0, function.__name__ + ' ' + str(err.args))
+            with open('error_log.txt','a') as err_file:
+                err_file.write('[' + ctime() + '] ' +' in ' + function.__name__ + ' ' + str(err.args) + '\n')
+
     return wrapper
 
 
 class Server_listener(Thread):
+    
     def __init__(self):
         Thread.__init__(self)
         self.stop = False
@@ -117,11 +122,18 @@ def parse_command(command_string: str) -> str:
                 ': !connect <room name> - connect to a room',
                 ': !disconnect - disconnect from the current room',
                 ': !roomlist - see the list of public rooms',
-                ': !users - see the list of users in current room')
-    elif words[0] == '!test':
-        add_str('system: text')
+                ': !users - see the list of users in current room',
+                ': !clear - clear the list of messages')
+    elif words[0] == '!ban':
+        return 'BAN ' + words[1]
+    elif words[0] == '!clear':
+        strings.clear()
+        for i in range(1,max_strings+1):
+            screen.addstr(i, 1, ' '*(SCREEN_X - 2))
+    elif words[0] == '!kick':
+        return 'KICK ' + words[1]
     else:
-        add_str('system: cant recognize "'+words[0]+'" command',
+        add_str('system: can not recognize "'+words[0]+'" command',
                 ':try !help to see the list of commands')
 
 
@@ -179,6 +191,7 @@ def get_msg(welcome_msg = '>>> ') -> str:
                 cursor_x += 1
     return ''.join(letter_list)  
 
+
 @err_handler
 def pick_username() -> str:
     picked = False
@@ -207,6 +220,7 @@ def pick_username() -> str:
             add_str('system:"' + nickname + '" is occupied!')
             picked = unique = False
     return nickname
+
 
 @err_handler
 def connect_to_server(host: str, port: int) -> None:
@@ -243,6 +257,7 @@ curses.init_pair(5, curses.COLOR_MAGENTA, curses.COLOR_BLACK)
 curses.init_pair(6, curses.COLOR_GREEN, curses.COLOR_BLACK)
 curses.init_pair(7, curses.COLOR_BLACK, curses.COLOR_WHITE)
 curses.init_pair(8, curses.COLOR_WHITE, curses.COLOR_BLACK)
+
 colors = {
     'red':curses.color_pair(1),
     'blue':curses.color_pair(2),
@@ -260,13 +275,13 @@ max_strings = SCREEN_Y - 3
 scrolled_strings = 0
 strings = []
 disconnected = False
-something = True
+prog_is_alive = True
 HOST, PORT = '127.0.0.1', 9090
-nickname = 'some name has to be initialized'
+nickname = ''
 
 if __name__ == '__main__':
     try:
-        while something:
+        while prog_is_alive:
             server_listener = Server_listener()
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             connect_to_server(HOST,PORT)
@@ -292,4 +307,4 @@ if __name__ == '__main__':
                             disconnected = True
     except Exception as err:
         screen.addstr(0,0,' '+str(err.args))
-    
+        err_file.write('[' + ctime() + '] ' +' in main ' + ' ' + str(err.args) + '\n')
