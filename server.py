@@ -25,25 +25,23 @@ class Connected_User(Thread):
         
     def send_msg(self, message):
         try:
-            #self.conn.send(message.encode('utf-8'))
             self.conn.send(xor_crypt(message.encode('utf-8'), self.xor_key))
             return False
         except ConnectionResetError:
-            print('Connection reset by', self.addr)
+            print(get_date(), 'connection reset by', self.addr)
             self.disconnect_from_server()
             return False
 
     def get_msg(self):
         try:
             data = self.conn.recv(1024)
-            print(data)
             if not data:
-                print('Connection reset by', self.addr)
+                print(get_date(), 'connection reset by', self.addr)
                 self.disconnect_from_server()
                 return False
             return xor_crypt(data, self.xor_key).decode('utf-8')
         except ConnectionResetError:
-            print('Connection reset by', self.addr)
+            print(get_date(), 'connection reset by', self.addr)
             self.disconnect_from_server()
         return False
 
@@ -51,12 +49,11 @@ class Connected_User(Thread):
         pass
             
     def run(self):
-        print('Connection Established with', self.addr)
+        print(get_date(), 'connection established with', self.addr)
         self.conn.send(public.save_pkcs1())
         encrypted_xor_key = self.conn.recv(1024)
         self.xor_key = rsa.decrypt(encrypted_xor_key, private)
-        print('Secure connection established with', self.addr)
-        print(self.xor_key)
+        print(get_date(), 'secure connection established with', self.addr)
         while True:
             client_data = self.get_msg()
             if not client_data:
@@ -124,7 +121,7 @@ class Connected_User(Thread):
             else:
                 client_data = 'Can not recognize: ' + client_data
                 break
-            print(client_data)
+            print(get_date(), client_data)
         self.conn.close()
 
 class Room:
@@ -155,7 +152,7 @@ class Room:
                     if password == '':
                         user_conn.send_msg('system: this is a password protected room. Please enter a password')
                     else:
-                        user_conn.send_msg('system: Wrong password. Check your input and try again')
+                        user_conn.send_msg('system: wrong password. Check your input and try again')
                 
         else:
             user_conn.send_msg('system: you are banned from this room')
@@ -260,18 +257,18 @@ commands_length = {
     'KICK':2
     }
 
-print(get_date() + ' server started')
+print(get_date(), 'server started')
 HOST,PORT = '127.0.0.1', 9090
 sock = socket.socket()
 sock.bind((HOST,PORT))
-print(get_date() + ' running on ' + HOST + ':' + str(PORT))
+print(get_date(), 'running on', HOST + ':' + str(PORT))
 connections = []
 rooms = []
 occupied_nicknames = ['system', 'System', 'admin', 'Admin', 'Administrator', 'FOXYMILIAN', 'HuHguZ', 'Alisa', 'alisa']
 occupied_room_names = []
 public, private = rsa.newkeys(1024)
-print(get_date() + ' RSA keypair generated')
-print(get_date() + ' ready for connections')
+print(get_date(), 'RSA keypair generated')
+print(get_date(), 'ready for connections')
 while True:
     sock.listen(1)
     connection = Connected_User(sock.accept())
