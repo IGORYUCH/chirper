@@ -1,6 +1,8 @@
+from rsa import PublicKey, encrypt as rsa_encrypt
+from threading import Thread
+from random import choice
 from time import ctime
 import socket
-from threading import Thread
 import curses
 import rsa
 
@@ -30,18 +32,20 @@ class Server_listener(Thread):
         try:
             server_data = sock.recv(1024)
             if not server_data:
-                add_str('system: disconnected by server1')
+                add_str('system: disconnected by server')
                 return False
         except ConnectionResetError:
-            add_str('system: disconnected by server2')
+            add_str('system: disconnected by server (connection reset)')
             return False
-        return server_data.decode('utf-8')
+        return xor_crypt(server_data, xor_key).decode('utf-8')
+        #return server_data.decode('utf-8')
 
     
     @err_handler
     def send_data(self, message):
         try:
-            sock.send(message.encode('utf-8'))
+            sock.send(xor_crypt(message.encode('utf-8'), xor_key))
+            #sock.send(message.encode('utf-8'))
             return True
         except ConnectionResetError:
             add_str('system: disconnected by server')
@@ -110,7 +114,10 @@ def parse_command(command_string: str) -> str:
     if words[0] == '!create':
         return 'CREATE ' + words[1]
     elif words[0] == '!connect':
-        return 'CONNECT ' + words[1]
+        if len(words) > 2:
+            return 'CONNECT ' + words[1] + ' ' + words[2]
+        else:
+            return 'CONNECT ' + words[1] + ' '
     elif words[0] == '!rooms':
         return 'ROOMLIST'
     elif words[0] == '!users':
@@ -132,6 +139,14 @@ def parse_command(command_string: str) -> str:
             screen.addstr(i, 1, ' '*(SCREEN_X - 2))
     elif words[0] == '!kick':
         return 'KICK ' + words[1]
+    elif words[0] == '!password':
+        return 'PASSWORD ' + words[1]
+    elif words[0] == '!check':
+        password = get_msg('Enter secret password no one knows(check): ')
+        if password == 'check':
+            add_str('pass_checker: Right! You so quick-witted!')
+        else:
+            add_str('pass_checker: Wrong password. Maybe you should think a little bit more')
     else:
         add_str('system: can not recognize "'+words[0]+'" command',
                 ':try !help to see the list of commands')
@@ -197,8 +212,7 @@ def pick_username() -> str:
     picked = False
     unique = False
     nickname = ''
-    letter_pool = 'qwerttyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM123' + \
-                  '4567890_'
+    letter_pool = 'qwerttyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890_'
     while not unique:
         while not picked:
             nickname = get_msg('Enter your name: ')        
@@ -211,9 +225,9 @@ def pick_username() -> str:
                     picked = True
             else:
                 add_str('system: must be more than 3 and less than 16 letters')
-        sock.send(('SETNAME ' + nickname).encode('utf-8'))
-        respond = sock.recv(1024)
-        if respond.decode('utf-8').split()[0] == 'ACCEPT':
+        server_listener.send_data(('SETNAME ' + nickname))
+        respond = server_listener.get_data()
+        if respond.split()[0] == 'ACCEPT':
             unique = True
             add_str('system: nickname accepted')
         else:
@@ -235,19 +249,32 @@ def connect_to_server(host: str, port: int) -> None:
             attempts += 1
     else:
         add_str('system: can not connect to server!')
-        desicion = get_msg('retry? (y,n): ')
+        desicion = get_msg('retry? (yes, no): ')
         if desicion[0] == 'y':
             connect_to_server(HOST, PORT)
         elif desicion[0] == 'n':
             exit()
 
+
+@err_handler
+def xor_crypt(string:bytes, key:bytes) -> bytes:
+    assert isinstance(string, bytes)
+    assert isinstance(key, bytes)
+    key_len = len(key)
+    fitted_key = bytes(key[index % key_len] for index in range(len(string)))# fit the key to the length of a message
+    crypto_str = bytes([string[index] ^ fitted_key[index] for index in range(len(string))])
+    return crypto_str
+
+
 SCREEN_Y, SCREEN_X = 24, 80
+KEYLEN = 64
+STR_FREE_SPACE = SCREEN_X - 2
+XOR_ALPHABET = b'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTYVWXYZ1234567890+/'
 screen = curses.initscr()
 screen.resize(SCREEN_Y, SCREEN_X)
 screen.keypad(True)
 curses.start_color()
 curses.noecho()
-STR_FREE_SPACE = SCREEN_X - 2
 
 curses.init_pair(1, curses.COLOR_RED, curses.COLOR_BLACK)
 curses.init_pair(2, curses.COLOR_BLUE, curses.COLOR_BLACK)
@@ -272,6 +299,7 @@ user_colors = {
     }
 
 max_strings = SCREEN_Y - 3
+xor_key = bytes([choice(XOR_ALPHABET) for i in range(KEYLEN)])
 scrolled_strings = 0
 strings = []
 disconnected = False
@@ -285,6 +313,13 @@ if __name__ == '__main__':
             server_listener = Server_listener()
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             connect_to_server(HOST,PORT)
+            
+            #establishing a secure connection
+            tagged_server_pub = sock.recv(1024)
+            server_pub = PublicKey.load_pkcs1(tagged_server_pub)
+            xor_encrypted_key = rsa_encrypt(xor_key, server_pub)
+            sock.send(xor_encrypted_key)
+            
             disconnected = False
             nickname = pick_username()
             server_listener.start()
@@ -302,9 +337,10 @@ if __name__ == '__main__':
                             if not sent:
                                 disconnected = True
                     else:
-                        sent = server_listener.send_data('MESSAGE '+nickname + ": " + message)
+                        sent = server_listener.send_data('MESSAGE ' + nickname + ": " + message)
                         if not sent:
                             disconnected = True
     except Exception as err:
         screen.addstr(0,0,' '+str(err.args))
-        err_file.write('[' + ctime() + '] ' +' in main ' + ' ' + str(err.args) + '\n')
+        with open('error_log.txt','a') as err_file:
+            err_file.write('[' + ctime() + '] ' +' in ' + function.__name__ + ' ' + str(err.args) + '\n')

@@ -1,7 +1,7 @@
 import socket
-from time import ctime,sleep
+from time import ctime
 from threading import Thread
-import sys
+from datetime import datetime
 import rsa
 
 class Connected_User(Thread):
@@ -10,6 +10,7 @@ class Connected_User(Thread):
         self.conn = data[0]
         self.addr = data[1]
         self.disconnected = False
+        self.xor_key = b''
         self.nickname = ''
         self.room = None
         
@@ -22,25 +23,25 @@ class Connected_User(Thread):
         del self
         return True
         
-        
     def send_msg(self, message):
         try:
-            self.conn.send(message.encode('utf-8'))
+            #self.conn.send(message.encode('utf-8'))
+            self.conn.send(xor_crypt(message.encode('utf-8'), self.xor_key))
             return False
         except ConnectionResetError:
             print('Connection reset by', self.addr)
-
             self.disconnect_from_server()
             return False
 
     def get_msg(self):
         try:
             data = self.conn.recv(1024)
+            print(data)
             if not data:
                 print('Connection reset by', self.addr)
                 self.disconnect_from_server()
                 return False
-            return data.decode('utf-8')
+            return xor_crypt(data, self.xor_key).decode('utf-8')
         except ConnectionResetError:
             print('Connection reset by', self.addr)
             self.disconnect_from_server()
@@ -50,7 +51,12 @@ class Connected_User(Thread):
         pass
             
     def run(self):
-        print('Connection Established with',self.addr)
+        print('Connection Established with', self.addr)
+        self.conn.send(public.save_pkcs1())
+        encrypted_xor_key = self.conn.recv(1024)
+        self.xor_key = rsa.decrypt(encrypted_xor_key, private)
+        print('Secure connection established with', self.addr)
+        print(self.xor_key)
         while True:
             client_data = self.get_msg()
             if not client_data:
@@ -71,10 +77,10 @@ class Connected_User(Thread):
             elif data_words[0] == 'CONNECT':
                 for room in rooms:
                     if room.room_name == data_words[1]:
-                        room.connect_user(self)
+                        room.connect_user(self, data_words[2])
                         break
-                    else:
-                       self.send_msg('system: the room "' + data_words[1] + '" are not avaliable')
+                else:
+                   self.send_msg('system: the room "' + data_words[1] + '" are not avaliable')
             elif data_words[0] == 'CREATE':
                 if not( data_words[1] in occupied_room_names):
                     new_room = Room(data_words[1])
@@ -109,8 +115,15 @@ class Connected_User(Thread):
                     self.room.kick_user(self, data_words[1])
                 else:
                     self.send_msg('system: you are not in the room!')
+            elif data_words[0] == 'PASSWORD':
+                if self.room:
+                    self.room.change_pass(self,data_words[1])
+                else:
+                    self.send_msg('system: you are not in the room!')
+                    
             else:
                 client_data = 'Can not recognize: ' + client_data
+                break
             print(client_data)
         self.conn.close()
 
@@ -126,11 +139,24 @@ class Room:
         for connection in self.connected_users:
             connection.send_msg(msg)
 
-    def connect_user(self, user_conn):
+    def connect_user(self, user_conn, password=''):
         if user_conn.nickname not in self.banned_users:
-            self.connected_users.append(user_conn)
-            user_conn.room = self
-            self.send_msg(('system: connected ' + user_conn.nickname))
+            if self.password == '':
+                self.connected_users.append(user_conn)
+                user_conn.room = self
+                self.send_msg(('system: connected ' + user_conn.nickname))
+            else:
+                if self.password == password:
+                    user_conn.send_msg('system: password accepted')
+                    self.connected_users.append(user_conn)
+                    user_conn.room = self
+                    self.send_msg(('system: connected ' + user_conn.nickname))
+                else:
+                    if password == '':
+                        user_conn.send_msg('system: this is a password protected room. Please enter a password')
+                    else:
+                        user_conn.send_msg('system: Wrong password. Check your input and try again')
+                
         else:
             user_conn.send_msg('system: you are banned from this room')
         
@@ -194,8 +220,34 @@ class Room:
                 kicking_user_conn.send_msg('system: there is no ' + kicked_username + ' in room')
         else:
             kicking_user_conn.send_msg('system: you do not have admin rights')
-        
 
+    def change_pass(self,changing_user,password):
+        if changing_user.nickname in self.admins:
+            if password == 'reset':
+                self.password = ''
+                self.send_msg('system: password has been reset')
+            else:
+                self.password = password
+                self.send_msg('system: password has been changed')
+        else:
+            changing_user.send_msg('system: you do not have admin rights')
+
+
+def xor_crypt(string:bytes, key:bytes) -> bytes:
+    assert isinstance(string, bytes)
+    assert isinstance(key, bytes)
+    key_len = len(key)
+    fitted_key = bytes(key[index % key_len] for index in range(len(string)))
+    crypto_str = bytes([string[index] ^ fitted_key[index] for index in range(len(string))])
+    return crypto_str
+
+
+def get_date() -> str:
+    date = datetime.now()
+    date_str = '[{0:0>2}-{1:0>2}-{2:0>4} {3:0>2}:{4:0>2}]'.format(date.day, date.month, date.year, date.hour, date.minute)
+    return date_str
+    
+    
 commands_length = {
     'SETNAME':2,
     'MESSAGE':2,
@@ -208,14 +260,18 @@ commands_length = {
     'KICK':2
     }
 
+print(get_date() + ' server started')
 HOST,PORT = '127.0.0.1', 9090
 sock = socket.socket()
 sock.bind((HOST,PORT))
+print(get_date() + ' running on ' + HOST + ':' + str(PORT))
 connections = []
 rooms = []
 occupied_nicknames = ['system', 'System', 'admin', 'Admin', 'Administrator', 'FOXYMILIAN', 'HuHguZ', 'Alisa', 'alisa']
 occupied_room_names = []
-print('Running on ' + HOST + ':' + str(PORT) + ' started ' + ctime() + '\nWaiting for connections...')
+public, private = rsa.newkeys(1024)
+print(get_date() + ' RSA keypair generated')
+print(get_date() + ' ready for connections')
 while True:
     sock.listen(1)
     connection = Connected_User(sock.accept())
